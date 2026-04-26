@@ -1,17 +1,14 @@
-"""
-RMR Tunnel Support Design — Streamlit App
-==========================================
-Predicts: RMR Score · Rock Class · Bolt Density · Bolt Length · Shotcrete Thickness
-Models  : Ridge/Lasso · Logistic Regression · SVM/SVR · Random Forest · ANN (PyTorch)
-Inputs  : 6 RMR89 params (Bieniawski 1989) + Excavation Span · Depth · Excavation Method
-"""
+# RMR Tunnel Support Designer — Streamlit App
+# Predicts support requirements from 9 geotechnical inputs
+# Models: Physics Engine · Ridge/Lasso · SVM/SVR · Random Forest · ANN (PyTorch)
+# Trained models expected as .pkl / .pth in same directory — app degrades gracefully if missing
 
 import streamlit as st
 import numpy as np
 import json
 import os
 
-# ── Optional heavy imports (graceful degradation if models not present) ─────
+# optional heavy imports — app still runs on physics engine if these aren't available
 try:
     import joblib
     JOBLIB_OK = True
@@ -25,9 +22,7 @@ try:
 except ImportError:
     TORCH_OK = False
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ─────────────────────────────────────────────────────────────────────────────
+# ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="RMR Tunnel Support Designer",
     page_icon="⛏️",
@@ -35,9 +30,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# STYLES
-# ─────────────────────────────────────────────────────────────────────────────
+# ── custom CSS — dark theme cards and badges ─────────────────────────────────
 st.markdown("""
 <style>
   /* Main background */
@@ -135,9 +128,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PHYSICS / REFERENCE ENGINE  (mirrors rmr_dataset_generator.ipynb exactly)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── physics / reference engine ───────────────────────────────────────────────
+# mirrors rmr_dataset_generator.ipynb exactly — same rating tables, same support equations
 
 CLASS_ORDER  = ['I', 'II', 'III', 'IV', 'V']
 CLASS_COLORS = {'I': '#2ecc71', 'II': '#3498db', 'III': '#f39c12',
@@ -150,6 +142,7 @@ ORIENT_ADJ = [0, -2, -5, -10, -12]
 BOLT_DENSITY_MAP = {'I': 0.00, 'II': 0.16, 'III': 0.44, 'IV': 1.00, 'V': 1.78}
 
 
+# Bieniawski (1989) Table 2 — individual parameter ratings
 def ucs_rating(u):
     if   u > 250: return 15
     elif u > 100: return 12
@@ -182,6 +175,7 @@ def get_class(rmr):
     elif rmr >= 21: return 'IV'
     else:           return 'V'
 
+# depth factor from Hoek & Marinos (2000) squeezing criterion
 def depth_stress_factor(rmr, depth_m, ucs_mpa):
     sigma_v  = 0.027 * depth_m
     sigma_cm = 0.5 * ucs_mpa * np.exp((rmr - 100) / 24.0)
@@ -189,6 +183,7 @@ def depth_stress_factor(rmr, depth_m, ucs_mpa):
     ratio    = sigma_v / sigma_cm
     return min(1.5, 1.0 + 0.3 * max(0.0, ratio - 0.2))
 
+# bolt length base values — Table 5, then scaled by span fraction (Lowson & Bieniawski 2013)
 def base_bolt_length(rmr):
     if   rmr >= 81: return 2.0
     elif rmr >= 61: return 3.0
@@ -210,6 +205,7 @@ def compute_bolt_length(rmr, span, depth, ucs, method):
     lb *= 1.0 + 0.5 * (df - 1.0)
     return float(np.clip(lb, 2.0, 7.0))
 
+# shotcrete base — Table 5, then span scaled per Rehman et al. (2018)
 def base_shotcrete_mm(rmr):
     if   rmr >= 81: return 0.0
     elif rmr >= 61: return 25.0
@@ -248,9 +244,7 @@ def get_individual_ratings(ucs, rqd, js, jc, gw, orient_adj):
         'B  Orientation':   orient_adj,
     }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ANN MODEL CLASS
-# ─────────────────────────────────────────────────────────────────────────────
+# ── ANN model class — same architecture as in rmr_model_training.ipynb ───────
 if TORCH_OK:
     class RMR_ANN(nn.Module):
         def __init__(self, input_dim, output_dim, hidden_sizes=[64, 32], dropout=0.2):
@@ -265,15 +259,13 @@ if TORCH_OK:
         def forward(self, x):
             return self.network(x)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MODEL LOADER
-# ─────────────────────────────────────────────────────────────────────────────
+# ── model loader ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_models():
-    """Try to load saved model files. Return dict of what's available."""
+    # try loading all .pkl and .pth files — silently skip anything missing
     models = {}
 
-    # Sklearn models
+    # sklearn models
     if JOBLIB_OK:
         sklearn_files = {
             'scaler':   'scaler.pkl',
@@ -301,7 +293,7 @@ def load_models():
                 except Exception:
                     pass
 
-    # ANN
+    # ANN — load architecture from json then weights from .pth
     if TORCH_OK and os.path.exists('ann_architectures.json'):
         try:
             with open('ann_architectures.json') as f:
@@ -333,18 +325,16 @@ def load_models():
 
     return models
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ML PREDICTION
-# ─────────────────────────────────────────────────────────────────────────────
+# ── ML prediction ────────────────────────────────────────────────────────────
 def ml_predict(models, X_raw, model_key_prefix):
-    """Run ML prediction. Returns dict matching physics_predict output, or None."""
+    # returns dict matching physics_predict output, or None if any model missing
     if not models:
         return None
 
     scaler  = models.get('scaler')
     encoder = models.get('encoder')
 
-    # Decide if this family uses scaled input
+    # RF uses raw features — tree models don't need scaling
     needs_scale = model_key_prefix in ('lr', 'svm', 'ann')
 
     X = np.array(X_raw, dtype=np.float64).reshape(1, -1)
@@ -407,9 +397,7 @@ def ml_predict(models, X_raw, model_key_prefix):
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SUPPORT DESCRIPTION HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
+# ── class descriptions and reference table ───────────────────────────────────
 CLASS_DESC = {
     'I':   ('Very Good Rock', '#2ecc71', 'Rock is self-supporting. Spot bolts where needed. No systematic shotcrete required.'),
     'II':  ('Good Rock',      '#3498db', 'Systematic bolting and thin shotcrete in crown. Occasional wire mesh.'),
@@ -429,9 +417,7 @@ SUPPORT_TABLE_HTML = """
 </table>
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — INPUT PARAMETERS
-# ─────────────────────────────────────────────────────────────────────────────
+# ── sidebar inputs ───────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## ⛏️ RMR Parameters")
 
@@ -540,15 +526,13 @@ with st.sidebar:
         "</div>", unsafe_allow_html=True
     )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# COMPUTE PREDICTIONS
-# ─────────────────────────────────────────────────────────────────────────────
+# ── run predictions ──────────────────────────────────────────────────────────
 X_raw = [ucs, rqd, js, jc, gw, orient_adj, span, depth, method]
 
-# Always compute physics baseline
+# physics baseline always computed — used as fallback if ML model fails
 phys = physics_predict(ucs, rqd, js, jc, gw, orient_adj, span, depth, method)
 
-# Select display result
+# pick result to display based on sidebar selection
 if selected_model == "Physics Engine (Bieniawski 1989)":
     result = phys
 elif selected_model == "Ridge / Lasso + LogReg":
@@ -571,9 +555,7 @@ shotcrete    = result['shotcrete']
 ratings = get_individual_ratings(ucs, rqd, js, jc, gw, orient_adj)
 cls_info = CLASS_DESC.get(rock_class, CLASS_DESC['III'])
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN AREA
-# ─────────────────────────────────────────────────────────────────────────────
+# ── main display area ────────────────────────────────────────────────────────
 st.markdown("# ⛏️ RMR Tunnel Support Designer")
 st.markdown(
     "<div style='color:#8892b0;font-size:0.9rem;margin-top:-8px;margin-bottom:16px;'>"
@@ -581,7 +563,7 @@ st.markdown(
     "</div>", unsafe_allow_html=True
 )
 
-# ── TOP ROW — key results ──────────────────────────────────────────────────
+# top row — 5 key result cards
 col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
@@ -640,7 +622,7 @@ with col5:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── SECOND ROW — RMR breakdown + recommendations ──────────────────────────
+# second row — RMR breakdown on left, support recommendation on right
 left, right = st.columns([1.1, 1], gap="large")
 
 with left:
@@ -676,7 +658,7 @@ with left:
     </div>
     """, unsafe_allow_html=True)
 
-    # Depth stress note
+    # show warning if squeezing threshold exceeded
     df = depth_stress_factor(phys['rmr'], depth, ucs)
     if df > 1.0:
         st.markdown(f"""
@@ -713,7 +695,7 @@ with right:
     </div>
     """, unsafe_allow_html=True)
 
-    # Excavation method note
+    # TBM reduction note — only shown when TBM selected
     if method == 0:
         st.markdown("""
         <div class="info-banner">
@@ -722,7 +704,7 @@ with right:
         </div>
         """, unsafe_allow_html=True)
 
-# ── THIRD ROW — comparison table + reference ─────────────────────────────
+# third row — model comparison table + reference table
 st.markdown("---")
 col_a, col_b = st.columns(2)
 
@@ -768,9 +750,7 @@ with col_b:
     </div>
     """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FOOTER
-# ─────────────────────────────────────────────────────────────────────────────
+# ── footer — references ──────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown("""
 <div style="font-size:0.74rem;color:#555;text-align:center;line-height:1.6;">
