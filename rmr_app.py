@@ -22,7 +22,7 @@ try:
 except ImportError:
     TORCH_OK = False
 
-# ── page config ──────────────────────────────────────────────────────────────
+# page config 
 st.set_page_config(
     page_title="RMR Tunnel Support Designer",
     page_icon="⛏️",
@@ -30,7 +30,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── custom CSS — dark theme cards and badges ─────────────────────────────────
+# custom CSS — dark theme cards and badges
 st.markdown("""
 <style>
   /* Main background */
@@ -128,7 +128,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── physics / reference engine ───────────────────────────────────────────────
+# physics / reference engine 
 # mirrors rmr_dataset_generator.ipynb exactly — same rating tables, same support equations
 
 CLASS_ORDER  = ['I', 'II', 'III', 'IV', 'V']
@@ -144,58 +144,58 @@ BOLT_DENSITY_MAP = {'I': 0.00, 'II': 0.16, 'III': 0.44, 'IV': 1.00, 'V': 1.78}
 
 # Bieniawski (1989) Table 2 — individual parameter ratings
 def ucs_rating(u):
-    if   u > 250: return 15
+    if u > 250: return 15
     elif u > 100: return 12
-    elif u > 50:  return 7
-    elif u > 25:  return 4
-    elif u > 5:   return 2
-    else:         return 1
+    elif u > 50: return 7
+    elif u > 25: return 4
+    elif u > 5: return 2
+    else: return 1
 
 def rqd_rating(r):
-    if   r >= 90: return 20
+    if r >= 90: return 20
     elif r >= 75: return 17
     elif r >= 50: return 13
     elif r >= 25: return 8
-    else:         return 3
+    else: return 3
 
 def js_rating(s):
-    if   s > 2:    return 20
-    elif s > 0.6:  return 15
-    elif s > 0.2:  return 10
+    if s > 2: return 20
+    elif s > 0.6: return 15
+    elif s > 0.2: return 10
     elif s > 0.06: return 8
-    else:          return 5
+    else: return 5
 
 def compute_rmr(ucs, rqd, js, jc, gw, orient_adj):
     return ucs_rating(ucs) + rqd_rating(rqd) + js_rating(js) + JC_MAP[jc] + GW_MAP[gw] + orient_adj
 
 def get_class(rmr):
-    if   rmr >= 81: return 'I'
+    if rmr >= 81: return 'I'
     elif rmr >= 61: return 'II'
     elif rmr >= 41: return 'III'
     elif rmr >= 21: return 'IV'
-    else:           return 'V'
+    else: return 'V'
 
 # depth factor from Hoek & Marinos (2000) squeezing criterion
 def depth_stress_factor(rmr, depth_m, ucs_mpa):
-    sigma_v  = 0.027 * depth_m
+    sigma_v = 0.027 * depth_m
     sigma_cm = 0.5 * ucs_mpa * np.exp((rmr - 100) / 24.0)
     sigma_cm = max(sigma_cm, 0.5)
-    ratio    = sigma_v / sigma_cm
+    ratio = sigma_v / sigma_cm
     return min(1.5, 1.0 + 0.3 * max(0.0, ratio - 0.2))
 
 # bolt length base values — Table 5, then scaled by span fraction (Lowson & Bieniawski 2013)
 def base_bolt_length(rmr):
-    if   rmr >= 81: return 2.0
+    if rmr >= 81: return 2.0
     elif rmr >= 61: return 3.0
     elif rmr >= 41: return 4.0
     elif rmr >= 21: return 4.5
-    else:           return 5.5
+    else: return 5.5
 
 def span_fraction(rmr):
-    if   rmr >= 61: return 0.30
+    if rmr >= 61: return 0.30
     elif rmr >= 41: return 0.40
     elif rmr >= 21: return 0.50
-    else:           return 0.60
+    else: return 0.60
 
 def compute_bolt_length(rmr, span, depth, ucs, method):
     lb = max(base_bolt_length(rmr), span_fraction(rmr) * span)
@@ -207,11 +207,11 @@ def compute_bolt_length(rmr, span, depth, ucs, method):
 
 # shotcrete base — Table 5, then span scaled per Rehman et al. (2018)
 def base_shotcrete_mm(rmr):
-    if   rmr >= 81: return 0.0
+    if rmr >= 81: return 0.0
     elif rmr >= 61: return 25.0
     elif rmr >= 41: return 75.0
     elif rmr >= 21: return 125.0
-    else:           return 175.0
+    else: return 175.0
 
 def compute_shotcrete_mm(rmr, span, depth, ucs, method):
     t = base_shotcrete_mm(rmr) * (span / 10.0)
@@ -222,26 +222,26 @@ def compute_shotcrete_mm(rmr, span, depth, ucs, method):
     return float(np.clip(t, 0.0, 250.0))
 
 def physics_predict(ucs, rqd, js, jc, gw, orient_adj, span, depth, method):
-    rmr          = compute_rmr(ucs, rqd, js, jc, gw, orient_adj)
-    rock_class   = get_class(rmr)
+    rmr = compute_rmr(ucs, rqd, js, jc, gw, orient_adj)
+    rock_class = get_class(rmr)
     bolt_density = BOLT_DENSITY_MAP[rock_class]
-    bolt_length  = compute_bolt_length(rmr, span, depth, ucs, method)
-    shotcrete    = compute_shotcrete_mm(rmr, span, depth, ucs, method)
+    bolt_length = compute_bolt_length(rmr, span, depth, ucs, method)
+    shotcrete = compute_shotcrete_mm(rmr, span, depth, ucs, method)
     return {
         'rmr': rmr, 'class': rock_class,
         'bolt_density': bolt_density,
-        'bolt_length':  bolt_length,
-        'shotcrete':    shotcrete,
+        'bolt_length': bolt_length,
+        'shotcrete': shotcrete,
     }
 
 def get_individual_ratings(ucs, rqd, js, jc, gw, orient_adj):
     return {
-        'R1 UCS':           ucs_rating(ucs),
-        'R2 RQD':           rqd_rating(rqd),
+        'R1 UCS': ucs_rating(ucs),
+        'R2 RQD': rqd_rating(rqd),
         'R3 Joint Spacing': js_rating(js),
-        'R4 Joint Cond.':   JC_MAP[jc],
-        'R5 Groundwater':   GW_MAP[gw],
-        'B  Orientation':   orient_adj,
+        'R4 Joint Cond.': JC_MAP[jc],
+        'R5 Groundwater': GW_MAP[gw],
+        'B  Orientation': orient_adj,
     }
 
 # ── ANN model class — same architecture as in rmr_model_training.ipynb ───────
@@ -259,32 +259,30 @@ if TORCH_OK:
         def forward(self, x):
             return self.network(x)
 
-# ── model loader ─────────────────────────────────────────────────────────────
+# model loader 
 @st.cache_resource
 def load_models():
-    # try loading all .pkl and .pth files — silently skip anything missing
     models = {}
-
     # sklearn models
     if JOBLIB_OK:
         sklearn_files = {
-            'scaler':   'scaler.pkl',
-            'encoder':  'label_encoder.pkl',
-            'lr_rmr':   'model_lr_rmr.pkl',
-            'lr_cls':   'model_lr_class.pkl',
-            'lr_bd':    'model_lr_bolt_density.pkl',
-            'lr_bl':    'model_lr_bolt_length.pkl',
-            'lr_sc':    'model_lr_shotcrete.pkl',
-            'svm_rmr':  'model_svm_rmr.pkl',
-            'svm_cls':  'model_svm_class.pkl',
-            'svm_bd':   'model_svm_bolt_density.pkl',
-            'svm_bl':   'model_svm_bolt_length.pkl',
-            'svm_sc':   'model_svm_shotcrete.pkl',
-            'rf_rmr':   'model_rf_rmr.pkl',
-            'rf_cls':   'model_rf_class.pkl',
-            'rf_bd':    'model_rf_bolt_density.pkl',
-            'rf_bl':    'model_rf_bolt_length.pkl',
-            'rf_sc':    'model_rf_shotcrete.pkl',
+            'scaler': 'scaler.pkl',
+            'encoder': 'label_encoder.pkl',
+            'lr_rmr': 'model_lr_rmr.pkl',
+            'lr_cls': 'model_lr_class.pkl',
+            'lr_bd': 'model_lr_bolt_density.pkl',
+            'lr_bl': 'model_lr_bolt_length.pkl',
+            'lr_sc':  'model_lr_shotcrete.pkl',
+            'svm_rmr': 'model_svm_rmr.pkl',
+            'svm_cls': 'model_svm_class.pkl',
+            'svm_bd': 'model_svm_bolt_density.pkl',
+            'svm_bl': 'model_svm_bolt_length.pkl',
+            'svm_sc': 'model_svm_shotcrete.pkl',
+            'rf_rmr': 'model_rf_rmr.pkl',
+            'rf_cls': 'model_rf_class.pkl',
+            'rf_bd': 'model_rf_bolt_density.pkl',
+            'rf_bl': 'model_rf_bolt_length.pkl',
+            'rf_sc': 'model_rf_shotcrete.pkl',
         }
         for key, fname in sklearn_files.items():
             if os.path.exists(fname):
@@ -301,11 +299,11 @@ def load_models():
             models['ann_arch'] = arch_info
 
             task_spec = {
-                'RMR':         ('ann_rmr',   1),
-                'Class':       ('ann_cls',   5),
-                'BoltDensity': ('ann_bd',    1),
-                'BoltLength':  ('ann_bl',    1),
-                'Shotcrete':   ('ann_sc',    1),
+                'RMR': ('ann_rmr', 1),
+                'Class': ('ann_cls', 5),
+                'BoltDensity': ('ann_bd', 1),
+                'BoltLength': ('ann_bl', 1),
+                'Shotcrete': ('ann_sc', 1),
             }
             for task_name, (key, out_dim) in task_spec.items():
                 # Try both naming conventions from notebooks
@@ -325,7 +323,7 @@ def load_models():
 
     return models
 
-# ── ML prediction ────────────────────────────────────────────────────────────
+# ML prediction 
 def ml_predict(models, X_raw, model_key_prefix):
     # returns dict matching physics_predict output, or None if any model missing
     if not models:
@@ -346,11 +344,11 @@ def ml_predict(models, X_raw, model_key_prefix):
 
     results = {}
     tasks = [
-        ('rmr',          'rmr',  'regression'),
-        ('cls',          'cls',  'classification'),
-        ('bd',           'bd',   'regression'),
-        ('bl',           'bl',   'regression'),
-        ('sc',           'sc',   'regression'),
+        ('rmr', 'rmr',  'regression'),
+        ('cls','cls', 'classification'),
+        ('bd', 'bd', 'regression'),
+        ('bl', 'bl', 'regression'),
+        ('sc', 'sc',  'regression'),
     ]
 
     for short, res_key, task_type in tasks:
@@ -389,20 +387,20 @@ def ml_predict(models, X_raw, model_key_prefix):
         results['class'] = get_class(int(round(results.get('rmr', 50))))
 
     return {
-        'rmr':          results.get('rmr', 0),
-        'class':        results['class'],
+        'rmr': results.get('rmr', 0),
+        'class': results['class'],
         'bolt_density': results.get('bd', 0),
-        'bolt_length':  results.get('bl', 0),
-        'shotcrete':    results.get('sc', 0),
+        'bolt_length': results.get('bl', 0),
+        'shotcrete': results.get('sc', 0),
     }
 
 
-# ── class descriptions and reference table ───────────────────────────────────
+# class descriptions and reference table 
 CLASS_DESC = {
     'I':   ('Very Good Rock', '#2ecc71', 'Rock is self-supporting. Spot bolts where needed. No systematic shotcrete required.'),
-    'II':  ('Good Rock',      '#3498db', 'Systematic bolting and thin shotcrete in crown. Occasional wire mesh.'),
-    'III': ('Fair Rock',      '#f39c12', 'Systematic bolting with steel arches. 50–100 mm shotcrete in crown and sides.'),
-    'IV':  ('Poor Rock',      '#e67e22', 'Systematic bolting, steel arches, and 100–150 mm shotcrete. Forepoling may be needed.'),
+    'II':  ('Good Rock', '#3498db', 'Systematic bolting and thin shotcrete in crown. Occasional wire mesh.'),
+    'III': ('Fair Rock', '#f39c12', 'Systematic bolting with steel arches. 50–100 mm shotcrete in crown and sides.'),
+    'IV':  ('Poor Rock', '#e67e22', 'Systematic bolting, steel arches, and 100–150 mm shotcrete. Forepoling may be needed.'),
     'V':   ('Very Poor Rock', '#e74c3c', 'Heavy systematic support, steel arches, and ≥150 mm shotcrete. Immediate support required.'),
 }
 
@@ -417,7 +415,7 @@ SUPPORT_TABLE_HTML = """
 </table>
 """
 
-# ── sidebar inputs ───────────────────────────────────────────────────────────
+# sidebar inputs 
 with st.sidebar:
     st.markdown("## ⛏️ RMR Parameters")
 
@@ -526,7 +524,7 @@ with st.sidebar:
         "</div>", unsafe_allow_html=True
     )
 
-# ── run predictions ──────────────────────────────────────────────────────────
+# run predictions
 X_raw = [ucs, rqd, js, jc, gw, orient_adj, span, depth, method]
 
 # physics baseline always computed — used as fallback if ML model fails
@@ -546,16 +544,16 @@ elif selected_model == "ANN (PyTorch)":
 else:
     result = phys
 
-rmr_val      = result['rmr']
-rock_class   = result['class']
+rmr_val = result['rmr']
+rock_class = result['class']
 bolt_density = result['bolt_density']
-bolt_length  = result['bolt_length']
-shotcrete    = result['shotcrete']
+bolt_length = result['bolt_length']
+shotcrete = result['shotcrete']
 
 ratings = get_individual_ratings(ucs, rqd, js, jc, gw, orient_adj)
 cls_info = CLASS_DESC.get(rock_class, CLASS_DESC['III'])
 
-# ── main display area ────────────────────────────────────────────────────────
+# main display area 
 st.markdown("# ⛏️ RMR Tunnel Support Designer")
 st.markdown(
     "<div style='color:#8892b0;font-size:0.9rem;margin-top:-8px;margin-bottom:16px;'>"
@@ -715,11 +713,11 @@ with col_a:
         phys_r = phys
         ml_r   = result
         comp_rows = [
-            ("RMR Score",      f"{phys_r['rmr']:.1f}",           f"{ml_r['rmr']:.1f}"),
-            ("Rock Class",     f"Class {phys_r['class']}",        f"Class {ml_r['class']}"),
-            ("Bolt Density",   f"{phys_r['bolt_density']:.2f} /m²", f"{ml_r['bolt_density']:.2f} /m²"),
-            ("Bolt Length",    f"{phys_r['bolt_length']:.2f} m",  f"{ml_r['bolt_length']:.2f} m"),
-            ("Shotcrete",      f"{phys_r['shotcrete']:.0f} mm",   f"{ml_r['shotcrete']:.0f} mm"),
+            ("RMR Score", f"{phys_r['rmr']:.1f}", f"{ml_r['rmr']:.1f}"),
+            ("Rock Class", f"Class {phys_r['class']}", f"Class {ml_r['class']}"),
+            ("Bolt Density", f"{phys_r['bolt_density']:.2f} /m²", f"{ml_r['bolt_density']:.2f} /m²"),
+            ("Bolt Length", f"{phys_r['bolt_length']:.2f} m", f"{ml_r['bolt_length']:.2f} m"),
+            ("Shotcrete", f"{phys_r['shotcrete']:.0f} mm", f"{ml_r['shotcrete']:.0f} mm"),
         ]
         tbl = "<table class='ref-table'><tr><th>Target</th><th>Physics</th><th>" + selected_model + "</th></tr>"
         for row in comp_rows:
@@ -750,7 +748,7 @@ with col_b:
     </div>
     """, unsafe_allow_html=True)
 
-# ── footer — references ──────────────────────────────────────────────────────
+# footer — references
 st.markdown("---")
 st.markdown("""
 <div style="font-size:0.74rem;color:#555;text-align:center;line-height:1.6;">
